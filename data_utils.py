@@ -1,0 +1,114 @@
+# Copyright 2020 - 2022 MONAI Consortium
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#     http://www.apache.org/licenses/LICENSE-2.0
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+import os
+
+from monai import data, transforms
+from monai.data import load_decathlon_datalist
+from monai.data import ITKReader
+import torch
+
+
+def get_loader(args):
+    data_dir = args.data_dir
+    datalist_json = os.path.join(data_dir, args.json_list)
+    train_transform = transforms.Compose(
+        [
+            transforms.LoadImaged(keys=["image", "label"], image_only=False),
+            transforms.EnsureChannelFirstd(keys=["image", "label"]),
+            transforms.Orientationd(keys=["image", "label"], axcodes="LPS"),
+
+            transforms.Spacingd(keys=["image", "label"], pixdim=(4.0728, 4.0728, 3.0), mode=("bilinear", "nearest")),
+            transforms.CropForegroundd(keys=["image", "label"], source_key="image"),
+
+            transforms.SpatialPadd(
+                keys=["image", "label"],
+                spatial_size=(args.roi_x, args.roi_y, args.roi_z)
+            ),
+
+            transforms.RandCropByPosNegLabeld(
+                keys=["image", "label"],
+                label_key="label",
+                spatial_size=(args.roi_x, args.roi_y, args.roi_z),  # smaller => higher fg ratio in patch
+                pos=3, neg=1,  # bias to positives
+                num_samples=4,  # more patches per image
+                image_key="image",
+                image_threshold=0,  # use label for pos/neg decision
+            ),
+
+            transforms.RandFlipd(keys=["image", "label"], prob=args.RandFlipd_prob, spatial_axis=0),
+            transforms.RandFlipd(keys=["image", "label"], prob=args.RandFlipd_prob, spatial_axis=1),
+            transforms.RandFlipd(keys=["image", "label"], prob=args.RandFlipd_prob, spatial_axis=2),
+            transforms.RandRotate90d(keys=["image", "label"], prob=args.RandRotate90d_prob, max_k=3),
+            transforms.RandScaleIntensityd(keys="image", factors=0.1, prob=args.RandScaleIntensityd_prob),
+            transforms.RandShiftIntensityd(keys="image", offsets=0.1, prob=args.RandShiftIntensityd_prob),
+            transforms.ToTensord(keys=["image", "label"]),
+            transforms.EnsureTyped(keys=["image"], dtype=torch.float32),
+            transforms.EnsureTyped(keys=["label"], dtype=torch.long),
+        ]
+    )
+    val_transform = transforms.Compose(
+        [
+            transforms.LoadImaged(keys=["image", "label"],image_only=False),
+            transforms.EnsureChannelFirstd(keys=["image", "label"]),
+            transforms.Orientationd(keys=["image", "label"], axcodes="LPS"),
+            transforms.CropForegroundd(keys=["image", "label"], source_key="image"),
+            transforms.ToTensord(keys=["image", "label"]),
+            transforms.EnsureTyped(keys=["image"], dtype=torch.float32),
+            transforms.EnsureTyped(keys=["label"], dtype=torch.long),
+        ]
+    )
+
+    test_transform = transforms.Compose(
+        [
+            transforms.LoadImaged(keys=["image", "label"],image_only=False),
+            transforms.EnsureChannelFirstd(keys=["image", "label"]),
+            transforms.Orientationd(keys=["image"], axcodes="LPS"),
+            transforms.ToTensord(keys=["image", "label"]),
+            transforms.EnsureTyped(keys=["image"], dtype=torch.float32),
+            transforms.EnsureTyped(keys=["label"], dtype=torch.long),
+        ]
+    )
+
+    if args.test_mode:
+        test_files = load_decathlon_datalist(datalist_json, True, "validation", base_dir=data_dir)
+        test_ds = data.Dataset(data=test_files, transform=test_transform)
+        test_loader = data.DataLoader(
+            test_ds,
+            batch_size=1,
+            shuffle=False,
+            num_workers=args.workers,
+            sampler=None,
+            pin_memory=True,
+            persistent_workers=True,
+        )
+        loader = test_loader
+    else:
+        datalist = load_decathlon_datalist(datalist_json, True, "training", base_dir=data_dir)
+        train_ds = data.CacheDataset(
+            data=datalist, transform=train_transform, cache_num=24, cache_rate=1.0, num_workers=args.workers
+        )
+        train_loader = data.DataLoader(
+            train_ds,
+            batch_size=args.batch_size,
+            shuffle=True,
+            num_workers=args.workers,
+            sampler=None,
+            pin_memory=True,
+        )
+        val_files = load_decathlon_datalist(datalist_json, True, "validation", base_dir=data_dir)
+        val_ds = data.Dataset(data=val_files, transform=val_transform)
+        val_loader = data.DataLoader(
+            val_ds, batch_size=1, shuffle=False, num_workers=args.workers, sampler=None, pin_memory=True
+        )
+        loader = [train_loader, val_loader]
+
+    return loader
