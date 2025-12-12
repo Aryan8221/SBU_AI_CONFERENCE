@@ -64,13 +64,15 @@ parser.add_argument("--RandScaleIntensityd_prob", default=0.1, type=float, help=
 parser.add_argument("--RandShiftIntensityd_prob", default=0.1, type=float, help="RandShiftIntensityd aug probability")
 parser.add_argument("--smooth_dr", default=1e-6, type=float, help="constant added to dice denominator to avoid nan")
 parser.add_argument("--smooth_nr", default=0.0, type=float, help="constant added to dice numerator to avoid zero")
+parser.add_argument("--use_ssl_pretrained", action="store_true", help="use self-supervised pretrained weights")
+parser.add_argument("--ssl_pretrained_path", default="./pretrained_models/model_swinvit.pt", type=str, help="path to the visual representation")
 parser.add_argument("--gpu", default=0, type=int, help="gpu ID")
 parser.add_argument("--squared_dice", action="store_true", help="use squared Dice")
 
 
 def main():
     args.amp = not args.noamp
-    args.logdir = "./Tessssssst/" + args.exp
+    args.logdir = "./swin_unetr_center2_results/" + args.exp
     os.makedirs(args.logdir, exist_ok=True)
     logger = setup_logger(args)
 
@@ -153,6 +155,28 @@ def main_worker(args, logger):
             best_acc = checkpoint["best_acc"]
         logger.info("=> loaded checkpoint '{}' (epoch {}) (bestacc {})".format(args.checkpoint, start_epoch, best_acc))
 
+    if args.use_ssl_pretrained:
+        try:
+            model_dict = torch.load(args.ssl_pretrained_path)
+            state_dict = model_dict["state_dict"]
+            # fix potential differences in state dict keys from pre-training to
+            # fine-tuning
+            if "module." in list(state_dict.keys())[0]:
+                logger.info("Tag 'module.' found in state dict - fixing!")
+                for key in list(state_dict.keys()):
+                    state_dict[key.replace("module.", "")] = state_dict.pop(key)
+            if "swin_vit" in list(state_dict.keys())[0]:
+                logger.info("Tag 'swin_vit' found in state dict - fixing!")
+                for key in list(state_dict.keys()):
+                    state_dict[key.replace("swin_vit", "swinViT")] = state_dict.pop(key)
+            # We now load model weights, setting param `strict` to False, i.e.:
+            # this load the encoder weights (Swin-ViT, SSL pre-trained), but leaves
+            # the decoder weights untouched (CNN UNet decoder).
+            model.load_state_dict(state_dict, strict=False)
+            logger.info(f"Using pretrained self-supervised Swin UNETR backbone weights: {args.ssl_pretrained_path}")
+        except ValueError:
+            raise ValueError("Self-supervised pre-trained weights not available for" + str(args.model_name))
+
     model.cuda(args.gpu)
 
     if args.optim_name == "adam":
@@ -188,9 +212,11 @@ def main_worker(args, logger):
 
 if __name__ == "__main__":
     args = parser.parse_args()
-    args.exp = "pet-ct-fold15"
-    args.data_dir = "/content/drive/MyDrive/SBU_AI_Conference/DATA_WITH_ORGAN_CLIPPED"
-    args.json_list = "center2_fold_15.json"
+    args.exp = "pet-ct-ssl-center2-fold0"
+    args.data_dir = "/content/drive/MyDrive/SBU_AI_Conference/NEW_DATA"
+    args.json_list = "center_folds/center2/fold0.json"
+    args.use_ssl_pretrained = True
+    args.ssl_pretrained_path = "/content/drive/MyDrive/SBU_AI_Conference/pretrained_model/model_bestValRMSE.pt"
     args.in_channels = 2
     args.out_channels = 12
     args.max_epochs = 1000

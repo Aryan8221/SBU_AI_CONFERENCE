@@ -9,16 +9,19 @@ from pathlib import Path
 #   Mask/Seg1_merged.seg_aligned.nii.gz
 
 IDX_CT_RE   = re.compile(r"^CT(\d+)-res\.nii\.gz$", re.IGNORECASE)
-IDX_PT_RE   = re.compile(r"^PT(\d+)-res\.nii(?:\.gz)?$", re.IGNORECASE)
-IDX_LBL1_RE = re.compile(r"^(\d+)_seg\.nii\.gz$", re.IGNORECASE)      # unchanged
-IDX_LBL2_RE = re.compile(r"^Seg(\d+)\.nii$", re.IGNORECASE)          # <- changed: .nii, no .gz
+IDX_PT_RE   = re.compile(r"^PT(\d+)-res\.nii\.gz$", re.IGNORECASE)
+IDX_LBL1_RE = re.compile(r"^(\d+)_seg\.nii\.gz$", re.IGNORECASE)  # LABELS/{idx}_seg.nii.gz
+IDX_LBL2_RE = re.compile(r"^Seg(\d+)\.nii$", re.IGNORECASE)
 
+# Hard-coded center ranges:
+CENTER1_RANGE = range(1, 12)   # 1..11
+CENTER2_RANGE = range(12, 25)  # 12..24
 
 
 def index_from_name(name: str, kind: str):
     if kind == "ct":
         m = IDX_CT_RE.match(name)
-    elif kind == "PT":
+    elif kind == "pt":
         m = IDX_PT_RE.match(name)
     elif kind == "label1":
         m = IDX_LBL1_RE.match(name)
@@ -30,21 +33,25 @@ def index_from_name(name: str, kind: str):
 
 
 def scan_modalities(root: Path):
-    print(f"root: {Path(root) / "CT"}")
-    ct_dir  = Path(root) / "CT"
-    pet_dir = Path(root) / "PT"
-    print(f"ct_dir.is_dir() : {ct_dir.is_dir()}")
-    print(f"ct_dir TYPE : {type(ct_dir)}")
+    root = Path(root)
+    ct_dir  = root / "CT"
+    pet_dir = root / "PT"
+
+    print(f"[INFO] CT dir:  {ct_dir}")
+    print(f"[INFO] PT dir: {pet_dir}")
+
     if not ct_dir.is_dir() or not pet_dir.is_dir():
         raise SystemExit("Expected subfolders CT/ and PT/ under --path")
 
     # labels in LABELS/ (idx_seg.nii.gz) or Mask/ (Seg{idx}[_merged].seg_aligned.nii.gz)
-    if (Path(root) / "LABELS").is_dir():
-        labels_dir = Path(root) / "LABELS"
+    if (root / "LABELS").is_dir():
+        labels_dir = root / "LABELS"
         label_mode = "labels"
-    elif (Path(root) / "Mask").is_dir():
-        labels_dir = Path(root) / "Mask"
+        print("[INFO] Using LABELS/ for ground truth.")
+    elif (root / "Mask").is_dir():
+        labels_dir = root / "Mask"
         label_mode = "mask"
+        print("[INFO] Using Mask/ for ground truth.")
     else:
         raise SystemExit("Expected LABELS/ or Mask/ folder under --path")
 
@@ -58,7 +65,7 @@ def scan_modalities(root: Path):
 
     # PT
     for f in sorted(os.listdir(pet_dir)):
-        idx = index_from_name(f, "PT")
+        idx = index_from_name(f, "pt")
         if idx is not None:
             pt_map[idx] = f
 
@@ -96,24 +103,34 @@ def make_entry(idx: int,
     }
 
 
-def write_loocv_all(
-    indices,
+def write_loco_two_centers(
+    center1_indices,
+    center2_indices,
     ct_dir: Path, pet_dir: Path, lbl_dir: Path,
     ct_map: dict, pt_map: dict, lbl_map: dict,
     out_dir: Path
 ):
     """
-    Single LOOCV over all indices.
-    Output: fold0.json, fold1.json, fold2.json, ...
+    Leave-one-center-out with 2 centers.
+    - fold0.json: train on center1, val on center2
+    - fold1.json: train on center2, val on center1
     """
-    indices = list(indices)
+    out_dir = Path(out_dir)
+    center1_indices = list(sorted(center1_indices))
+    center2_indices = list(sorted(center2_indices))
 
-    for fold_id, val_idx in enumerate(indices):
-        # all others are training
-        train_idxs = [i for i in indices if i != val_idx]
+    print(f"[INFO] Center1 indices: {center1_indices}")
+    print(f"[INFO] Center2 indices: {center2_indices}")
 
+    folds = [
+        ("fold0.json", center1_indices, center2_indices),  # train C1, val C2
+        ("fold1.json", center2_indices, center1_indices),  # train C2, val C1
+    ]
+
+    for fold_name, train_idxs, val_idxs in folds:
         training, validation = [], []
 
+        # training set
         for i in train_idxs:
             try:
                 training.append(
@@ -122,29 +139,31 @@ def write_loocv_all(
             except ValueError as e:
                 print(f"[WARN] Skipping train idx {i}: {e}")
 
-        try:
-            validation.append(
-                make_entry(val_idx, ct_dir, pet_dir, lbl_dir, ct_map, pt_map, lbl_map)
-            )
-        except ValueError as e:
-            print(f"[WARN] Skipping val idx {val_idx}: {e}")
+        # validation set
+        for j in val_idxs:
+            try:
+                validation.append(
+                    make_entry(j, ct_dir, pet_dir, lbl_dir, ct_map, pt_map, lbl_map)
+                )
+            except ValueError as e:
+                print(f"[WARN] Skipping val idx {j}: {e}")
 
         data = {"training": training, "validation": validation}
 
-        out_path = (Path(out_dir) / f"fold{fold_id}.json").resolve()
+        out_path = (out_dir / fold_name).resolve()
         out_path.parent.mkdir(parents=True, exist_ok=True)
         with open(out_path, "w") as f:
             json.dump(data, f, indent=2)
 
         print(
-            f"[OK] Wrote {out_path}: fold_id={fold_id}, "
-            f"val_idx={val_idx}, train={len(training)} val={len(validation)}"
+            f"[OK] Wrote {out_path}: "
+            f"train={len(training)} cases, val={len(validation)} cases"
         )
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Generate global LOOCV folds with ABSOLUTE paths (no centers)."
+        description="Generate LOCO (leave-one-center-out) folds for 2 centers with ABSOLUTE paths."
     )
     parser.add_argument(
         "--path",
@@ -162,18 +181,33 @@ def main():
 
     ct_dir, pet_dir, lbl_dir, ct_map, pt_map, lbl_map = scan_modalities(args.path)
 
-    print(f"CT map: {set(ct_map)}")
-    print(f"PT map: {pt_map}")
-    print(f"Label map: {lbl_map}")
-
     all_indices = sorted(set(ct_map) & set(pt_map) & set(lbl_map))
     if not all_indices:
         raise SystemExit("No common indices found across CT, PT, and LABELS/Mask.")
 
-    print(f"[INFO] Using {len(all_indices)} cases for global LOOCV.")
-    write_loocv_all(all_indices, ct_dir, pet_dir, lbl_dir, ct_map, pt_map, lbl_map, args.out)
+    print(f"[INFO] Found {len(all_indices)} indices with complete CT/PT/LABEL.")
 
-    print("[DONE] LOOCV JSONs written to:", args.out.resolve())
+    # Intersect with our assumed center ranges
+    center1_indices = sorted(set(CENTER1_RANGE) & set(all_indices))
+    center2_indices = sorted(set(CENTER2_RANGE) & set(all_indices))
+
+    if not center1_indices:
+        print("[WARN] No complete cases found for Center 1 (1–11).")
+    if not center2_indices:
+        print("[WARN] No complete cases found for Center 2 (12–24).")
+
+    if not center1_indices or not center2_indices:
+        raise SystemExit("Need at least one case in BOTH centers for LOCO.")
+
+    write_loco_two_centers(
+        center1_indices,
+        center2_indices,
+        ct_dir, pet_dir, lbl_dir,
+        ct_map, pt_map, lbl_map,
+        args.out,
+    )
+
+    print("[DONE] LOCO JSONs written to:", Path(args.out).resolve())
 
 
 if __name__ == "__main__":

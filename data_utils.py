@@ -29,17 +29,17 @@ def get_loader(args):
             transforms.Spacingd(keys=["image", "label"], pixdim=(4.0728, 4.0728, 3.0), mode=("bilinear", "nearest")),
             transforms.CropForegroundd(keys=["image", "label"], source_key="image"),
 
-            transforms.SpatialPadd(
-                keys=["image", "label"],
-                spatial_size=(args.roi_x, args.roi_y, args.roi_z)
-            ),
+            # transforms.SpatialPadd(
+            #     keys=["image", "label"],
+            #     spatial_size=(args.roi_x, args.roi_y, args.roi_z)
+            # ),
 
             transforms.RandCropByPosNegLabeld(
                 keys=["image", "label"],
                 label_key="label",
                 spatial_size=(args.roi_x, args.roi_y, args.roi_z),  # smaller => higher fg ratio in patch
                 pos=3, neg=1,  # bias to positives
-                num_samples=4,  # more patches per image
+                num_samples=8,  # more patches per image
                 image_key="image",
                 image_threshold=0,  # use label for pos/neg decision
             ),
@@ -51,8 +51,8 @@ def get_loader(args):
             transforms.RandScaleIntensityd(keys="image", factors=0.1, prob=args.RandScaleIntensityd_prob),
             transforms.RandShiftIntensityd(keys="image", offsets=0.1, prob=args.RandShiftIntensityd_prob),
             transforms.ToTensord(keys=["image", "label"]),
-            transforms.EnsureTyped(keys=["image"], dtype=torch.float32),
-            transforms.EnsureTyped(keys=["label"], dtype=torch.long),
+            # transforms.EnsureTyped(keys=["image"], dtype=torch.float32),
+            # transforms.EnsureTyped(keys=["label"], dtype=torch.long),
         ]
     )
     val_transform = transforms.Compose(
@@ -62,8 +62,8 @@ def get_loader(args):
             transforms.Orientationd(keys=["image", "label"], axcodes="LPS"),
             transforms.CropForegroundd(keys=["image", "label"], source_key="image"),
             transforms.ToTensord(keys=["image", "label"]),
-            transforms.EnsureTyped(keys=["image"], dtype=torch.float32),
-            transforms.EnsureTyped(keys=["label"], dtype=torch.long),
+            # transforms.EnsureTyped(keys=["image"], dtype=torch.float32),
+            # transforms.EnsureTyped(keys=["label"], dtype=torch.long),
         ]
     )
 

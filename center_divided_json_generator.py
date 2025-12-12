@@ -14,7 +14,6 @@ IDX_LBL1_RE = re.compile(r"^(\d+)_seg\.nii\.gz$", re.IGNORECASE)      # unchange
 IDX_LBL2_RE = re.compile(r"^Seg(\d+)\.nii$", re.IGNORECASE)          # <- changed: .nii, no .gz
 
 
-
 def index_from_name(name: str, kind: str):
     if kind == "ct":
         m = IDX_CT_RE.match(name)
@@ -30,7 +29,7 @@ def index_from_name(name: str, kind: str):
 
 
 def scan_modalities(root: Path):
-    print(f"root: {Path(root) / "CT"}")
+    print(f"root: {Path(root) / 'CT'}")
     ct_dir  = Path(root) / "CT"
     pet_dir = Path(root) / "PT"
     print(f"ct_dir.is_dir() : {ct_dir.is_dir()}")
@@ -100,10 +99,10 @@ def write_loocv_all(
     indices,
     ct_dir: Path, pet_dir: Path, lbl_dir: Path,
     ct_map: dict, pt_map: dict, lbl_map: dict,
-    out_dir: Path
+    out_dir: Path,
 ):
     """
-    Single LOOCV over all indices.
+    Single LOOCV over all indices in `indices`.
     Output: fold0.json, fold1.json, fold2.json, ...
     """
     indices = list(indices)
@@ -144,7 +143,7 @@ def write_loocv_all(
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Generate global LOOCV folds with ABSOLUTE paths (no centers)."
+        description="Generate per-center LOOCV folds with ABSOLUTE paths."
     )
     parser.add_argument(
         "--path",
@@ -170,10 +169,33 @@ def main():
     if not all_indices:
         raise SystemExit("No common indices found across CT, PT, and LABELS/Mask.")
 
-    print(f"[INFO] Using {len(all_indices)} cases for global LOOCV.")
-    write_loocv_all(all_indices, ct_dir, pet_dir, lbl_dir, ct_map, pt_map, lbl_map, args.out)
+    print(f"[INFO] Found {len(all_indices)} total cases: {all_indices}")
 
-    print("[DONE] LOOCV JSONs written to:", args.out.resolve())
+    # ----- Center splitting logic -----
+    # Center 1: indices 1–11
+    center1_indices = [i for i in all_indices if 1 <= i <= 11]
+    # Center 2: indices 12–24
+    center2_indices = [i for i in all_indices if 12 <= i <= 24]
+
+    print(f"[INFO] Center1 indices: {center1_indices}")
+    print(f"[INFO] Center2 indices: {center2_indices}")
+
+    # Run LOOCV separately for each center
+    if center1_indices:
+        out_c1 = args.out / "center1"
+        print(f"[INFO] Using {len(center1_indices)} cases for Center 1 LOOCV.")
+        write_loocv_all(center1_indices, ct_dir, pet_dir, lbl_dir, ct_map, pt_map, lbl_map, out_c1)
+    else:
+        print("[WARN] No indices found for Center 1. Skipping.")
+
+    if center2_indices:
+        out_c2 = args.out / "center2"
+        print(f"[INFO] Using {len(center2_indices)} cases for Center 2 LOOCV.")
+        write_loocv_all(center2_indices, ct_dir, pet_dir, lbl_dir, ct_map, pt_map, lbl_map, out_c2)
+    else:
+        print("[WARN] No indices found for Center 2. Skipping.")
+
+    print("[DONE] Per-center LOOCV JSONs written under:", args.out.resolve())
 
 
 if __name__ == "__main__":
