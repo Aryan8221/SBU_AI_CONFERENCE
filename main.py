@@ -72,7 +72,7 @@ parser.add_argument("--squared_dice", action="store_true", help="use squared Dic
 
 def main():
     args.amp = not args.noamp
-    args.logdir = "./swin_unetr_center2_results/" + args.exp
+    args.logdir = "./swin_unetr_center1_results/" + args.exp
     os.makedirs(args.logdir, exist_ok=True)
     logger = setup_logger(args)
 
@@ -212,14 +212,14 @@ def main_worker(args, logger):
 
 if __name__ == "__main__":
     args = parser.parse_args()
-    args.exp = "pet-ct-ssl-center2-fold0"
+    args.exp = "pet-center1-fold0"
     args.data_dir = "/content/drive/MyDrive/SBU_AI_Conference/NEW_DATA"
-    args.json_list = "center_folds/center2/fold0.json"
-    args.use_ssl_pretrained = True
+    args.json_list = "center_folds/center1_pet_only/fold0.json"
+    # args.use_ssl_pretrained = True
     args.ssl_pretrained_path = "/content/drive/MyDrive/SBU_AI_Conference/pretrained_model/model_bestValRMSE.pt"
-    args.in_channels = 2
+    args.in_channels = 1
     args.out_channels = 12
-    args.max_epochs = 1000
+    args.max_epochs = 500
     args.val_every = 100
     args.roi_x = 64
     args.roi_y = 64
